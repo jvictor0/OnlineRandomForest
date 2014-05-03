@@ -7,6 +7,7 @@ import System.Random
 import Data.Random
 import Data.Random.Distribution.Exponential
 import Data.Random.Distribution.Poisson
+import Data.Random.Distribution.Dirichlet
 import Utils
 import Control.Monad.State
 import Data.RVar
@@ -27,10 +28,11 @@ data CART_Params = CP
 instance Show CART_Params where
   show _ = "CART_Params"
 
+dirichlet_param dim = replicate dim 0.01
 
 mk_new_test :: Vector Double -> Vector Double -> StdGen -> ((Vector Double, Double),StdGen)
 mk_new_test mu sigma g = flip runState g $ do
-  splitdir <- fmap fromList $ mapM (const $ sampleRVar $ normal 0 1) [0..(dim mu)-1]
+  splitdir <- fmap fromList $ sampleRVar $ dirichlet $ dirichlet_param $ dim mu 
   threshvect <- fmap fromList $ mapM (\i -> sampleRVar $ normal (mu@>i) (sigma@>i)) [0..(dim mu)-1]
   return $ (splitdir,threshvect`dot`splitdir)
 
@@ -38,14 +40,15 @@ size (CART_Tree _ t) = node_size t
 node_size (InteriorNode _ _ l r) = 1 + (node_size l) + (node_size r)
 node_size _ = 1
 
-new_CART_Params mu sigma al bet lam dim = CP
+
+new_CART_Params mu sigma al bet dim = CP
   {
     alpha = al,
     new_test = mk_new_test mu sigma,
     predictor_dim = dim,
     beta = bet,
-    lambda = lam,
-    num_tests = ceiling $ sqrt $ fromIntegral $ dim
+    lambda = 1,
+    num_tests = ceiling $ dim//3 -- Friedman says this is not right, and this should be considered a free param...
   }
   
 type TestStats = (Vector Double, Double,  (Double, Int, Double), (Double, Int, Double))
@@ -60,9 +63,11 @@ data LeafStats = LS
                  }
                  deriving (Show)
 
-new_CART_Tree mu sigma alpha beta lam dim = do
+default_CART_Tree dim = new_CART_Tree (fromList $ replicate dim 0) (fromList $ replicate dim 3) 50 0.25 dim
+
+new_CART_Tree mu sigma alpha beta dim = do
   g <- newStdGen
-  let ps = new_CART_Params mu sigma alpha beta lam dim
+  let ps = new_CART_Params mu sigma alpha beta dim
       (_,thresh) = new_tests ps g
   return $ CART_Tree ps $ createNode thresh (0,0,0)
 
@@ -89,7 +94,7 @@ instance Learner CART_Tree where
     k <- getStdRandom $ sampleState (poisson $ lambda p) :: IO Int
     foldM (\tr _ ->  observe (x,y) tr) t [1..k]
   
-new_tests :: CART_Params -> StdGen -> (TestStats,TestStats)
+new_tests :: CART_Params -> StdGen -> ([TestStats],[TestStats])
 new_tests cps g = flip evalState g $ do
   t1 <- forM [1.. num_tests cps] $ \_ -> do
     g <- get

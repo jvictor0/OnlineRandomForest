@@ -12,3 +12,6 @@ cabal.config
 *~
 mix*
 *.dat
+*.aux
+*.log
+*.out
