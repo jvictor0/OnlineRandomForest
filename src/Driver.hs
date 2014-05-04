@@ -44,9 +44,9 @@ interactive_predictor dim l = do
              putStrLn "cannot parse inputs"
              interactive_predictor dim l
              
-random_forest_driver mu sigma alpha beta lambda dim n = do
+random_forest_driver mu sigma alpha beta dim n = do
   print dim
-  for <- new_ensemble (new_CART_Tree (fromList $ replicate dim mu) (fromList $ replicate dim sigma) alpha beta lambda dim) n
+  for <- new_ensemble (new_CART_Tree (fromList $ replicate dim mu) (fromList $ replicate dim sigma) alpha beta dim) n
   interactive_predictor dim for
     
 baked_online_predictor fn l dim bin_size = do
@@ -74,7 +74,7 @@ baked_online_predictor fn l dim bin_size = do
 
 default_tree_predictor :: FilePath -> Int -> IO Bool
 default_tree_predictor fn dim = do
-  for <- new_ensemble (new_CART_Tree (fromList $ replicate dim (1//dim)) (fromList $ replicate dim 2) 50 0.2 1.0 dim) 100
+  for <- new_ensemble (new_CART_Tree (fromList $ replicate dim (1//dim)) (fromList $ replicate dim 2) 50 0.2 dim) 100
   baked_online_predictor fn for dim 100
 
 
@@ -93,5 +93,5 @@ mixtureModel fp dim num_centres num_samples meta_centres = do
     return $ unwords $ map show $ y:x
   writeFile fp $ unlines lines
   
-mixtureStdBasis n = mixtureModel ("mix_" ++ show n) n 10 10000
+mixtureStdBasis n = mixtureModel ("mix_" ++ show n) n 10 1000
                     $ map (\i -> ([if j == i then 1 else 0 | j <- [1..n]], 3.0 * (fromIntegral i), 0.2, 0.5)) [1..n]
