@@ -43,7 +43,7 @@ size (CART_Tree _ t) = tree_size t
 tree_size (InteriorNode _ _ _ l r) = 1 + (tree_size l) + (tree_size r)
 tree_size _ = 1
 
-default_gamma = 0.9
+default_gamma = 0.95
 
 new_CART_Params mu sigma al bet dim = CP
   {
@@ -63,7 +63,6 @@ type TestStats = (Vector Double, Double,  (Double, Int, Double), (Double, Int, D
 data NodeStats = NS 
                  {
                    node_size :: Int,
-                   node_new_obs :: Int, 
                    oob_size :: Int, 
                    oob_error :: Double, 
                    estimate_mse :: Double,
@@ -72,13 +71,13 @@ data NodeStats = NS
                  }
                  deriving (Show)
 
-default_CART_Tree dim = new_CART_Tree (fromList $ replicate dim 0) (fromList $ replicate dim 3) 50 0.25 dim
+default_CART_Tree dim = new_CART_Tree $ new_CART_Params (fromList $ replicate dim 0) (fromList $ replicate dim 3) 50 0.25 dim
 
-new_CART_Tree mu sigma alpha_grow beta_grow dim = do
+new_CART_Tree params = do
   g <- newStdGen
-  let ps = new_CART_Params mu sigma alpha_grow beta_grow dim
-      (_,thresh) = new_tests ps g
-  return $ CART_Tree ps $ createNode thresh (0,0,0)
+  let (_,thresh) = new_tests params g
+  return $ CART_Tree params $ createNode thresh (0,0,0)
+  
 
 
 data CART_Node = InteriorNode NodeStats (Vector Double) Double CART_Node CART_Node
@@ -101,9 +100,9 @@ instance Predictor CART_Tree where
 instance Learner CART_Tree where
   learn x y t@(CART_Tree p n) = do
     k <- getStdRandom $ sampleState (poisson $ lambda p) :: IO Int
-    if k > 0 then foldM (\tr _ ->  observe (x,y) tr) t [1..k] else return t -- do
---      g <- newStdGen
---      return $ CART_Tree p $ observe_oob g p (x,y) n
+    if k > 0 then foldM (\tr _ ->  observe (x,y) tr) t [1..k] else do
+      g <- newStdGen
+      return $ CART_Tree p $ observe_oob g p (x,y) n
   
 new_tests :: CART_Params -> StdGen -> ([TestStats],[TestStats])
 new_tests cps g = flip evalState g $ do
@@ -131,7 +130,7 @@ observe_node g ps xy@(v,_) (InteriorNode s i x l r)
   | (v`dot`i) < x = let l' = observe_node g ps xy l in InteriorNode (updateStats ps xy s) i x l' r
   | otherwise  = let r' = observe_node g ps xy r in InteriorNode (updateStats ps xy s) i x l r'
 observe_node g ps xy (LeafNode stats) = let stats' = updateStats ps xy stats
-                                        in if (alpha_grow ps) <= (node_new_obs stats')
+                                        in if (alpha_grow ps) <= (node_size stats')
                                            then try_split g ps stats'
                                            else LeafNode stats'
 
@@ -154,7 +153,7 @@ updateOOB (x,y) ps stats = stats {
   oob_error = ((oob_error stats) * f + (1-f) * ((y-(node_prediction stats))^2)),
   oob_size = 1 + oob_size stats
   }
-  where f = (max 1 $ (oob_size stats)//(alpha_prune ps)) * (gamma ps) 
+  where f = (oob_size stats)//(1 + oob_size stats) * (gamma ps) 
 
 
 try_split :: StdGen -> CART_Params -> NodeStats -> CART_Node
@@ -170,7 +169,6 @@ try_split g ps stats = case flip find (node_tests stats) $
 createNode tests (mu,size,mse) = LeafNode (NS { 
                                               node_size = size, 
                                               oob_size = 0,
-                                              node_new_obs = 0,
                                               node_prediction = mu,
                                               node_tests = tests,
                                               oob_error = 0,
@@ -184,7 +182,6 @@ updateStats ps xy@(x,y) stats = stats'
   where stats' = stats
           { 
             node_size = 1 + node_size stats,
-            node_new_obs = 1 + node_new_obs stats,
             node_prediction = d',
             estimate_mse = avg_update (node_size stats) (estimate_mse stats) $ (y-d')^2,
             node_tests = map (\(spl,thr, (lmu,lsz,lmse), (rmu,rsz,rmse))
@@ -196,4 +193,4 @@ updateStats ps xy@(x,y) stats = stats'
                          $ node_tests stats
           }
         d' = f * (node_prediction stats) + (1-f) * y
-        f = (max 1 $ (node_size stats)//(alpha_grow ps)) * (gamma ps)
+        f = (node_size stats)//(1 + node_size stats)
